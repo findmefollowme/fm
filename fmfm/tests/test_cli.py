@@ -13,6 +13,13 @@ def test_cli_exposes_data_pipeline_commands():
     assert args.coin == "BTC"
     assert args.interval == "1m"
 
+    collector = parser.parse_args([
+        "collect-live", "--coin", "BTC", "--output", "data/raw/BTC_events.jsonl",
+        "--duration-seconds", "60",
+    ])
+    assert collector.command == "collect-live"
+    assert "trades" in collector.channels
+
     funding = parser.parse_args([
         "fetch-funding", "--coin", "BTC", "--start", "2026-01-01T00:00:00Z",
         "--end", "2026-01-02T00:00:00Z", "--output", "funding.csv",
