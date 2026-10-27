@@ -73,7 +73,7 @@ FMFM 将同时研究以下期限：**1 分钟、5 分钟、15 分钟、30 分钟
 
 时间必须包含时区，建议使用 UTC。示例下载 BTC 的一段 1 分钟历史数据：
 
-    fmfm fetch-candles --coin BTC --interval 1m --start 2026-01-01T00:00:00Z --end 2026-01-04T00:00:00Z --output data/BTC_1m.csv
+    fmfm fetch-candles --coin BTC --interval 1m --start 2026-10-24T00:00:00Z --end 2026-10-27T00:00:00Z --output data/BTC_1m.csv
 
 程序会保存 CSV 和对应的 JSON manifest，并输出数据质量报告。官方 API 的 K 线历史只有最近 5000 根；此示例时间范围约 3 天，适用于 1 分钟线。更久远的数据需要历史归档或从现在开始持续采集。
 
