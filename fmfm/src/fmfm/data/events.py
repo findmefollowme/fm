@@ -5,7 +5,6 @@ import json
 from pathlib import Path
 from typing import Any
 
-import numpy as np
 import pandas as pd
 
 from fmfm.features.flow import order_book_features
