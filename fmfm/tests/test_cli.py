@@ -26,8 +26,9 @@ def test_cli_exposes_data_pipeline_commands():
     ])
     assert funding.command == "fetch-funding"
 
-    features = parser.parse_args(["build-features", "--input", "bars.csv", "--output", "features.csv"])
+    features = parser.parse_args(["build-features", "--input", "bars.csv", "--output", "features.csv", "--source-interval", "1d"])
     assert features.command == "build-features"
+    assert features.source_interval == "1d"
 
     evaluate = parser.parse_args([
         "evaluate-ridge", "--features", "features.csv", "--targets", "targets.csv",
