@@ -95,19 +95,22 @@ FMFM 将同时研究以下期限：**1 分钟、5 分钟、15 分钟、30 分钟
 
 ### 5. 生成多周期训练标签
 
+先从 1 分钟数据生成日内预测目标：
+
     fmfm build-targets --coin BTC --input data/BTC_1m.csv --source-interval 1m --horizons 1m 5m 15m 30m 1h 2h 4h --output-dir data/targets_intraday
 
-# 单独获取更长的日线历史，支持日/周/月研究
-fmfm fetch-candles --coin BTC --interval 1d --start 2023-01-01T00:00:00Z --end 2026-10-27T00:00:00Z --output data/BTC_1d.csv
-fmfm build-targets --coin BTC --input data/BTC_1d.csv --source-interval 1d --horizons 1d 1w 1mo --output-dir data/targets_long
+再单独获取日线数据，用于日、周、月周期：
 
-默认只生成与输入周期相容的目标。输入为 1m 时可生成所有周期的标签，但最近 5000 根 1m K 线不足以支撑日、周、月模型训练；这些长周期的样本会很少或为空。固定周期只保留完整时间桶，并对跨越数据缺口的目标置空。
+    fmfm fetch-candles --coin BTC --interval 1d --start 2023-01-01T00:00:00Z --end 2026-10-27T00:00:00Z --output data/BTC_1d.csv
+    fmfm build-targets --coin BTC --input data/BTC_1d.csv --source-interval 1d --horizons 1d 1w 1mo --output-dir data/targets_long
+
+默认只生成与输入周期相容的目标。最近 5000 根 1 分钟 K 线不足以支撑日、周、月模型训练，所以长周期应使用单独下载的日线或其他足够长的历史数据。固定周期只保留完整时间桶，并对跨越数据缺口的目标置空。
 
 ### 6. 生成特征并评估一个简单的样本外预测基线
 
     fmfm build-features --input data/BTC_1m.csv --output data/BTC_features.csv
     fmfm build-targets --coin BTC --input data/BTC_1m.csv --source-interval 1m --horizons 1m 5m 15m 30m 1h 2h 4h --output-dir data/targets_intraday
-    fmfm evaluate-ridge --features data/BTC_features.csv --targets data/targets/BTC_1m_targets.csv --target-column forward_log_return_1m --output data/BTC_1m_predictions.csv --min-train-size 500 --test-size 100
+    fmfm evaluate-ridge --features data/BTC_features.csv --targets data/targets_intraday/BTC_1m_targets.csv --target-column forward_log_return_1m --output data/BTC_1m_predictions.csv --min-train-size 500 --test-size 100
 
 Ridge 基线采用扩展窗口训练、按时间向前预测，并只在训练集上拟合特征标准化参数。输出包括 MAE、RMSE、零收益基线 MAE、方向准确率和相关性。它只评估点预测，不等于可盈利交易策略；下一步还要用真实成本、资金费率和滑点做交易层回测。
 
