@@ -73,9 +73,9 @@ FMFM 将同时研究以下期限：**1 分钟、5 分钟、15 分钟、30 分钟
 
 时间必须包含时区，建议使用 UTC。示例下载 BTC 的一段 1 分钟历史数据：
 
-    fmfm fetch-candles --coin BTC --interval 1m --start 2026-01-01T00:00:00Z --end 2026-01-08T00:00:00Z --output data/BTC_1m.csv
+    fmfm fetch-candles --coin BTC --interval 1m --start 2026-01-01T00:00:00Z --end 2026-01-04T00:00:00Z --output data/BTC_1m.csv
 
-程序会保存 CSV 和对应的 JSON manifest，并输出数据质量报告。API 可用性、历史覆盖和缺口仍需检查；不能假设指定时间范围一定返回完整数据。
+程序会保存 CSV 和对应的 JSON manifest，并输出数据质量报告。官方 API 的 K 线历史只有最近 5000 根；此示例时间范围约 3 天，适用于 1 分钟线。更久远的数据需要历史归档或从现在开始持续采集。
 
 ### 2. 下载历史资金费率
 
@@ -92,6 +92,14 @@ FMFM 将同时研究以下期限：**1 分钟、5 分钟、15 分钟、30 分钟
     fmfm build-targets --coin BTC --input data/BTC_1m.csv --output-dir data/targets
 
 默认生成 1m、5m、15m、30m、1h、2h、4h、1d、1w 和 1mo 的未来收益/区间波动率标签。为避免把不完整聚合 K 线作为训练样本，固定周期只保留完整时间桶；月线需要完整的分钟覆盖才保留。标签仅供训练/评估，禁止作为同一时点输入特征。
+
+### 5. 生成特征并评估一个简单的样本外预测基线
+
+    fmfm build-features --input data/BTC_1m.csv --output data/BTC_features.csv
+    fmfm build-targets --coin BTC --input data/BTC_1m.csv --output-dir data/targets
+    fmfm evaluate-ridge --features data/BTC_features.csv --targets data/targets/BTC_1m_targets.csv --target-column forward_log_return_1m --output data/BTC_1m_predictions.csv --min-train-size 500 --test-size 100
+
+Ridge 基线采用扩展窗口训练、按时间向前预测，并只在训练集上拟合特征标准化参数。输出包括 MAE、RMSE、零收益基线 MAE、方向准确率和相关性。它只评估点预测，不等于可盈利交易策略；下一步还要用真实成本、资金费率和滑点做交易层回测。
 
 ## 重要限制
 
