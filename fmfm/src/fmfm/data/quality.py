@@ -17,6 +17,7 @@ def inspect_ohlcv(
         "row_count": len(bars),
         "missing_columns": missing_columns,
         "duplicate_timestamps": 0,
+        "invalid_timestamps": 0,
         "non_monotonic_timestamps": False,
         "invalid_ohlc_rows": 0,
         "negative_volume_rows": 0,
@@ -38,6 +39,7 @@ def inspect_ohlcv(
         return report
 
     report["duplicate_timestamps"] = int(times.duplicated().sum())
+    report["invalid_timestamps"] = int(times.isna().sum())
     valid_times = times.dropna()
     report["non_monotonic_timestamps"] = bool(not valid_times.is_monotonic_increasing)
     if not valid_times.empty:
