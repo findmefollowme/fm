@@ -13,9 +13,15 @@ import pandas as pd
 
 from fmfm.data.hyperliquid import HyperliquidPublicData
 from fmfm.data.hyperliquid_ws import SUPPORTED_CHANNELS, collect_public_stream
+from fmfm.data.events import (
+    asset_contexts_from_events,
+    book_features_from_events,
+    iter_jsonl_events,
+    trades_from_events,
+)
 from fmfm.data.quality import inspect_ohlcv
 from fmfm.data.storage import read_bars_csv, write_bars_csv
-from fmfm.features.flow import candle_flow_features
+from fmfm.features.flow import candle_flow_features, trade_flow_features
 from fmfm.horizons import HORIZON_BY_KEY, HORIZONS
 from fmfm.models.walk_forward import regression_metrics, walk_forward_ridge
 from fmfm.multi_horizon import build_multi_horizon_targets
@@ -158,21 +164,84 @@ def command_targets(args: argparse.Namespace) -> int:
     return 0
 
 
+def _merge_asof_features(
+    base: pd.DataFrame,
+    extra: pd.DataFrame,
+    *,
+    max_staleness: str,
+    allow_exact_matches: bool = True,
+) -> pd.DataFrame:
+    if extra.empty or len(extra.columns) <= 1:
+        return base
+    left = base.rename_axis("timestamp").reset_index()
+    right = extra.copy()
+    if "timestamp" not in right.columns:
+        right = right.rename_axis("timestamp").reset_index()
+    right["timestamp"] = pd.to_datetime(right["timestamp"], utc=True)
+    right = right.drop(columns=["coin"], errors="ignore")
+    merged = pd.merge_asof(
+        left.sort_values("timestamp"),
+        right.sort_values("timestamp"),
+        on="timestamp",
+        direction="backward",
+        tolerance=pd.Timedelta(max_staleness),
+        allow_exact_matches=allow_exact_matches,
+    )
+    return merged.set_index("timestamp").reindex(base.index)
+
+
 def command_build_features(args: argparse.Namespace) -> int:
     bars = read_bars_csv(args.input)
     features = candle_flow_features(bars)
     source_interval = args.source_interval
+    bar_open = pd.to_datetime(bars["timestamp"], utc=True)
     if source_interval == "1mo":
-        feature_time = pd.to_datetime(bars["timestamp"], utc=True) + pd.DateOffset(months=1)
+        feature_time = bar_open + pd.DateOffset(months=1)
     else:
-        feature_time = pd.to_datetime(bars["timestamp"], utc=True) + pd.to_timedelta(
+        feature_time = bar_open + pd.to_timedelta(
             HORIZON_BY_KEY[source_interval].minutes, unit="min"
         )
-    features.insert(0, "timestamp", feature_time.to_numpy())
+    features.index = pd.DatetimeIndex(feature_time, name="timestamp")
+
+    if args.events:
+        if source_interval != "1m":
+            raise ValueError("Raw WebSocket trade/book/context features currently require --source-interval 1m")
+        trades = trades_from_events(iter_jsonl_events(args.events), coin=args.coin)
+        trade_features = trade_flow_features(trades)
+        features = features.join(trade_features, how="left")
+
+        books = book_features_from_events(iter_jsonl_events(args.events), coin=args.coin)
+        features = _merge_asof_features(
+            features, books, max_staleness=args.max_event_staleness
+        )
+        contexts = asset_contexts_from_events(iter_jsonl_events(args.events), coin=args.coin)
+        features = _merge_asof_features(
+            features, contexts, max_staleness=args.max_event_staleness
+        )
+
+    if args.funding:
+        funding = pd.read_csv(args.funding)
+        if "timestamp" not in funding.columns:
+            raise ValueError("Funding CSV must contain a timestamp column")
+        funding["timestamp"] = pd.to_datetime(funding["timestamp"], utc=True, errors="raise")
+        features = _merge_asof_features(
+            features,
+            funding,
+            max_staleness=args.max_funding_staleness,
+            allow_exact_matches=False,
+        )
+
+    features.insert(0, "timestamp", features.index)
     output = Path(args.output)
     output.parent.mkdir(parents=True, exist_ok=True)
     features.to_csv(output, index=False)
-    print(json.dumps({"rows": len(features), "feature_columns": list(features.columns[1:]), "output": str(output)}, indent=2))
+    print(json.dumps({
+        "rows": len(features),
+        "feature_columns": list(features.columns[1:]),
+        "output": str(output),
+        "events_file": str(args.events) if args.events else None,
+        "funding_file": str(args.funding) if args.funding else None,
+    }, indent=2))
     return 0
 
 
@@ -256,6 +325,11 @@ def build_parser() -> argparse.ArgumentParser:
     features.add_argument("--input", type=Path, required=True)
     features.add_argument("--output", type=Path, required=True)
     features.add_argument("--source-interval", choices=[h.key for h in HORIZONS], default="1m")
+    features.add_argument("--events", type=Path, help="Optional raw JSONL from collect-live (1m source only)")
+    features.add_argument("--funding", type=Path, help="Optional historical funding CSV")
+    features.add_argument("--coin", default="BTC", help="Coin filter for raw events")
+    features.add_argument("--max-event-staleness", default="5min")
+    features.add_argument("--max-funding-staleness", default="2h")
     features.set_defaults(func=command_build_features)
 
     evaluate = commands.add_parser("evaluate-ridge", help="Run expanding-window ridge forecast evaluation")
