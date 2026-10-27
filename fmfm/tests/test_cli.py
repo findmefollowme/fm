@@ -2,7 +2,7 @@ import argparse
 
 import pytest
 
-from fmfm.cli import _utc_ms, build_parser
+from fmfm.cli import _json_safe, _utc_ms, build_parser
 
 
 def test_cli_exposes_data_pipeline_commands():
@@ -29,6 +29,10 @@ def test_cli_exposes_data_pipeline_commands():
         "--target-column", "forward_log_return_5m", "--output", "predictions.csv",
     ])
     assert evaluate.command == "evaluate-ridge"
+
+
+def test_non_finite_metrics_serialize_as_json_null():
+    assert _json_safe({"metric": float("nan")}) == {"metric": None}
 
 
 def test_utc_ms_requires_timezone():
