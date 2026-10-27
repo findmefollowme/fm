@@ -15,6 +15,12 @@ def test_cli_exposes_data_pipeline_commands():
     assert args.coin == "BTC"
     assert args.interval == "1m"
 
+    funding = parser.parse_args([
+        "fetch-funding", "--coin", "BTC", "--start", "2026-01-01T00:00:00Z",
+        "--end", "2026-01-02T00:00:00Z", "--output", "funding.csv",
+    ])
+    assert funding.command == "fetch-funding"
+
 
 def test_utc_ms_requires_timezone():
     with pytest.raises(argparse.ArgumentTypeError):
