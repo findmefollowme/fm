@@ -1,6 +1,7 @@
+import pandas as pd
 import pytest
 
-from fmfm.cli import _json_safe, _utc_ms, build_parser
+from fmfm.cli import _json_safe, _merge_asof_features, _utc_ms, build_parser
 
 
 def test_cli_exposes_data_pipeline_commands():
@@ -46,6 +47,20 @@ def test_cli_exposes_data_pipeline_commands():
         "--output-dir", "targets", "--source-interval", "1d",
     ])
     assert targets.source_interval == "1d"
+
+
+def test_asof_feature_merge_uses_only_recent_prior_snapshots():
+    index = pd.DatetimeIndex(
+        ["2026-01-01T00:01:00Z", "2026-01-01T00:02:00Z"], name="timestamp"
+    )
+    base = pd.DataFrame({"candle_feature": [1.0, 2.0]}, index=index)
+    extra = pd.DataFrame({
+        "timestamp": pd.to_datetime(["2026-01-01T00:00:30Z"]),
+        "spread_bps": [3.0],
+    })
+    merged = _merge_asof_features(base, extra, max_staleness="1min")
+    assert merged.iloc[0]["spread_bps"] == 3.0
+    assert pd.isna(merged.iloc[1]["spread_bps"])
 
 
 def test_non_finite_metrics_serialize_as_json_null():
