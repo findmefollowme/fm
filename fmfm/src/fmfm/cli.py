@@ -60,6 +60,30 @@ def command_fetch(args: argparse.Namespace) -> int:
     return 0 if not bars.empty else 2
 
 
+def command_fetch_funding(args: argparse.Namespace) -> int:
+    start_ms, end_ms = _utc_ms(args.start), _utc_ms(args.end)
+    client = HyperliquidPublicData(timeout=args.timeout)
+    funding = client.funding_history(
+        args.coin.upper(), start_ms, end_ms, page_size=args.page_size
+    )
+    output = Path(args.output)
+    output.parent.mkdir(parents=True, exist_ok=True)
+    funding.to_csv(output, index=False)
+    manifest = {
+        "source": "Hyperliquid public Info API",
+        "endpoint_type": "fundingHistory",
+        "coin": args.coin.upper(),
+        "requested_start": args.start,
+        "requested_end": args.end,
+        "rows": len(funding),
+        "output": str(output),
+        "note": "Funding history is a realized historical series; current open interest is a separate snapshot.",
+    }
+    _write_json(output.with_suffix(output.suffix + ".manifest.json"), manifest)
+    print(json.dumps(manifest, ensure_ascii=False, indent=2))
+    return 0 if not funding.empty else 2
+
+
 def command_inspect(args: argparse.Namespace) -> int:
     bars = read_bars_csv(args.input)
     report = inspect_ohlcv(bars, expected_frequency=args.expected_frequency)
@@ -102,6 +126,15 @@ def build_parser() -> argparse.ArgumentParser:
     fetch.add_argument("--chunk-size", type=int, default=5000, help="Candles per request (1..5000)")
     fetch.add_argument("--timeout", type=float, default=15.0)
     fetch.set_defaults(func=command_fetch)
+
+    funding = commands.add_parser("fetch-funding", help="Download public historical funding rates")
+    funding.add_argument("--coin", required=True)
+    funding.add_argument("--start", required=True, help="Timezone-aware ISO timestamp")
+    funding.add_argument("--end", required=True, help="Timezone-aware ISO timestamp")
+    funding.add_argument("--output", type=Path, required=True)
+    funding.add_argument("--page-size", type=int, default=500, help="API page size (1..500)")
+    funding.add_argument("--timeout", type=float, default=15.0)
+    funding.set_defaults(func=command_fetch_funding)
 
     inspect = commands.add_parser("inspect", help="Inspect a normalized OHLCV CSV")
     inspect.add_argument("--input", type=Path, required=True)
