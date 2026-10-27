@@ -70,6 +70,20 @@ FMFM 将同时研究以下期限：**1 分钟、5 分钟、15 分钟、30 分钟
     pip install -e ".[dev]"
     pytest
 
+### 本地一键采集与核验（推荐先执行）
+
+项目根目录中进入 `fmfm` 子目录，完成安装后，可以用脚本按顺序下载历史 K 线、历史资金费率，再采集实时 WebSocket 事件，并生成本地核验报告：
+
+    python scripts/collect_local.py --coin BTC --candle-days 3 --funding-days 30 --live-minutes 60
+
+第一次建议先用 5 分钟做连通性检查：
+
+    python scripts/collect_local.py --coin BTC --candle-days 1 --funding-days 7 --live-minutes 5
+
+脚本会在 `data/collection_runs/BTC_<UTC时间>/` 下生成 K 线 CSV、资金费率 CSV、原始事件 JSONL、K 线 manifest 和 `collection_report.json`。报告记录各频道实际收到的消息数、首末时间、K 线质量诊断以及采集错误。频道短时间没有消息不一定代表程序故障，但需要检查；报告显示文件已生成也不代表数据没有缺口。脚本按顺序先下载历史数据、再启动实时采集，所以实时事件不会覆盖历史下载期间的时间段。
+
+采集完成后，请把 `collection_report.json` 的内容发给助手，我们再根据实际行数、时间范围、频道计数和错误记录判断数据是否足以进入第一轮基线训练。数据目录默认不提交到 GitHub。
+
 ### 1. 下载 Hyperliquid 公开 K 线
 
 时间必须包含时区，建议使用 UTC。示例下载 BTC 的一段 1 分钟历史数据：
