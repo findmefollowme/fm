@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import sys
 from pathlib import Path
 
@@ -12,7 +13,9 @@ import pandas as pd
 from fmfm.data.hyperliquid import HyperliquidPublicData
 from fmfm.data.quality import inspect_ohlcv
 from fmfm.data.storage import read_bars_csv, write_bars_csv
+from fmfm.features.flow import candle_flow_features
 from fmfm.horizons import HORIZONS
+from fmfm.models.walk_forward import regression_metrics, walk_forward_ridge
 from fmfm.multi_horizon import build_multi_horizon_targets
 
 
@@ -113,6 +116,56 @@ def command_targets(args: argparse.Namespace) -> int:
     return 0
 
 
+def command_build_features(args: argparse.Namespace) -> int:
+    bars = read_bars_csv(args.input)
+    features = candle_flow_features(bars)
+    features.insert(0, "timestamp", bars["timestamp"].to_numpy())
+    output = Path(args.output)
+    output.parent.mkdir(parents=True, exist_ok=True)
+    features.to_csv(output, index=False)
+    print(json.dumps({"rows": len(features), "feature_columns": list(features.columns[1:]), "output": str(output)}, indent=2))
+    return 0
+
+
+def command_evaluate_ridge(args: argparse.Namespace) -> int:
+    feature_frame = read_bars_csv(args.features).set_index("timestamp")
+    target_frame = read_bars_csv(args.targets).set_index("timestamp")
+    if args.target_column not in target_frame.columns:
+        raise ValueError(f"Target column not found: {args.target_column}")
+    joined = feature_frame.join(target_frame[[args.target_column]], how="inner")
+    x = joined.drop(columns=[args.target_column])
+    y = joined[args.target_column]
+    predictions = walk_forward_ridge(
+        x,
+        y,
+        min_train_size=args.min_train_size,
+        test_size=args.test_size,
+        purge=args.purge,
+        alpha=args.alpha,
+    )
+    output = Path(args.output)
+    output.parent.mkdir(parents=True, exist_ok=True)
+    predictions.to_csv(output, index_label="timestamp")
+    metrics = regression_metrics(predictions)
+    report = {
+        "features_file": str(args.features),
+        "targets_file": str(args.targets),
+        "target_column": args.target_column,
+        "parameters": {
+            "min_train_size": args.min_train_size,
+            "test_size": args.test_size,
+            "purge": args.purge,
+            "alpha": args.alpha,
+        },
+        "metrics": metrics,
+        "predictions_file": str(output),
+        "warning": "Out-of-sample forecast metrics are not proof of profitability; include costs in a separate trading simulation.",
+    }
+    _write_json(output.with_suffix(output.suffix + ".metrics.json"), report)
+    print(json.dumps(_json_safe(report), ensure_ascii=False, indent=2, default=str))
+    return 0 if metrics["n"] else 2
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="fmfm", description="FMFM read-only quant research CLI")
     commands = parser.add_subparsers(dest="command", required=True)
@@ -140,6 +193,22 @@ def build_parser() -> argparse.ArgumentParser:
     inspect.add_argument("--input", type=Path, required=True)
     inspect.add_argument("--expected-frequency", default="1min")
     inspect.set_defaults(func=command_inspect)
+
+    features = commands.add_parser("build-features", help="Build OHLCV-derived flow proxy features")
+    features.add_argument("--input", type=Path, required=True)
+    features.add_argument("--output", type=Path, required=True)
+    features.set_defaults(func=command_build_features)
+
+    evaluate = commands.add_parser("evaluate-ridge", help="Run expanding-window ridge forecast evaluation")
+    evaluate.add_argument("--features", type=Path, required=True)
+    evaluate.add_argument("--targets", type=Path, required=True)
+    evaluate.add_argument("--target-column", required=True)
+    evaluate.add_argument("--output", type=Path, required=True)
+    evaluate.add_argument("--min-train-size", type=int, default=500)
+    evaluate.add_argument("--test-size", type=int, default=100)
+    evaluate.add_argument("--purge", type=int, default=1)
+    evaluate.add_argument("--alpha", type=float, default=1.0)
+    evaluate.set_defaults(func=command_evaluate_ridge)
 
     targets = commands.add_parser("build-targets", help="Build future labels for multiple horizons")
     targets.add_argument("--coin", required=True)
