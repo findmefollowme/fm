@@ -82,14 +82,24 @@ def resample_ohlcv(
     agg = {key: value for key, value in OHLCV_AGGREGATION.items() if key in frame.columns}
     result = frame.resample(HORIZON_BY_KEY[horizon].pandas_rule, label="left", closed="left").agg(agg)
     result = result.dropna(subset=["open", "high", "low", "close"])
-    if drop_incomplete and not result.empty:
-        source_minutes = HORIZON_BY_KEY["1m"].minutes
-        target_minutes = HORIZON_BY_KEY[horizon].minutes
-        if source_minutes is not None and target_minutes is not None and target_minutes > source_minutes:
-            counts = frame["close"].resample(
-                HORIZON_BY_KEY[horizon].pandas_rule, label="left", closed="left"
-            ).count()
-            result = result.loc[counts.reindex(result.index).fillna(0) >= target_minutes]
+    if drop_incomplete and not result.empty and horizon != "1m":
+        # This completeness check assumes the canonical source is 1-minute bars.
+        counts = frame["close"].resample(
+            HORIZON_BY_KEY[horizon].pandas_rule, label="left", closed="left"
+        ).count()
+        expected: dict[pd.Timestamp, int] = {}
+        if horizon == "1mo":
+            for bucket in result.index:
+                next_bucket = bucket + pd.DateOffset(months=1)
+                expected[bucket] = int((next_bucket - bucket).total_seconds() // 60)
+        else:
+            expected_count = HORIZON_BY_KEY[horizon].minutes
+            if expected_count is not None:
+                expected = {bucket: expected_count for bucket in result.index}
+        expected_series = pd.Series(expected, dtype="int64")
+        actual = counts.reindex(result.index).fillna(0).astype("int64")
+        required = expected_series.reindex(result.index).fillna(0)
+        result = result.loc[actual >= required]
     return result.rename_axis(timestamp_col).reset_index()
 
 
