@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Iterable, Iterator
 from pathlib import Path
 from typing import Any
 
@@ -10,9 +11,8 @@ import pandas as pd
 from fmfm.features.flow import order_book_features
 
 
-def read_jsonl_events(path: str | Path) -> list[dict[str, Any]]:
-    """Read append-only JSONL events and report malformed line numbers."""
-    events: list[dict[str, Any]] = []
+def iter_jsonl_events(path: str | Path) -> Iterator[dict[str, Any]]:
+    """Stream append-only JSONL events without loading the whole file into memory."""
     with Path(path).open("r", encoding="utf-8") as handle:
         for line_number, line in enumerate(handle, start=1):
             if not line.strip():
@@ -22,12 +22,16 @@ def read_jsonl_events(path: str | Path) -> list[dict[str, Any]]:
             except json.JSONDecodeError as exc:
                 raise ValueError(f"Malformed JSONL at line {line_number}: {exc}") from exc
             if isinstance(event, dict):
-                events.append(event)
-    return events
+                yield event
+
+
+def read_jsonl_events(path: str | Path) -> list[dict[str, Any]]:
+    """Read all JSONL events; use iter_jsonl_events for large streams."""
+    return list(iter_jsonl_events(path))
 
 
 def trades_from_events(
-    events: list[dict[str, Any]],
+    events: Iterable[dict[str, Any]],
     *,
     coin: str | None = None,
 ) -> pd.DataFrame:
