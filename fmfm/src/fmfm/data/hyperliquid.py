@@ -118,9 +118,21 @@ class HyperliquidPublicData:
         Requests longer than 5000 bars are rejected. Splitting a request into
         chunks does not bypass the venue's historical retention limit.
         """
+        if interval == "1M":
+            if end_ms < start_ms:
+                raise ValueError("end_ms must be >= start_ms")
+            if not 1 <= max_candles_per_request <= 5000:
+                raise ValueError("max_candles_per_request must be between 1 and 5000")
+            start = pd.to_datetime(start_ms, unit="ms", utc=True)
+            end = pd.to_datetime(end_ms, unit="ms", utc=True)
+            month_count = (end.year - start.year) * 12 + end.month - start.month + 1
+            if month_count > 5000 or month_count > max_candles_per_request:
+                raise ValueError("Monthly candles use one calendar-based request; keep the range within the request limit")
+            return self.candles(coin, interval, start_ms, end_ms)
+
         if interval not in _INTERVAL_MS:
             raise ValueError(
-                f"Unsupported fixed interval {interval!r}; choose from {tuple(_INTERVAL_MS)}"
+                f"Unsupported interval {interval!r}; choose from {tuple(_INTERVAL_MS)} or '1M'"
             )
         if end_ms < start_ms:
             raise ValueError("end_ms must be >= start_ms")
@@ -206,6 +218,30 @@ class HyperliquidPublicData:
             .drop_duplicates(["timestamp", "coin"], keep="last")
             .reset_index(drop=True)[_FUNDING_COLUMNS]
         )
+
+    @staticmethod
+    def drop_unclosed_candles(
+        bars: pd.DataFrame,
+        interval: str,
+        *,
+        as_of: pd.Timestamp | None = None,
+    ) -> pd.DataFrame:
+        """Remove the currently forming candle using an explicit UTC as-of time."""
+        if bars.empty:
+            return bars.copy()
+        if interval == "1M":
+            close_times = pd.to_datetime(bars["timestamp"], utc=True) + pd.DateOffset(months=1)
+        elif interval in _INTERVAL_MS:
+            close_times = pd.to_datetime(bars["timestamp"], utc=True) + pd.to_timedelta(
+                _INTERVAL_MS[interval], unit="ms"
+            )
+        else:
+            raise ValueError(f"Unsupported interval {interval!r}")
+        cutoff = pd.Timestamp.now(tz="UTC") if as_of is None else pd.Timestamp(as_of)
+        if cutoff.tzinfo is None:
+            raise ValueError("as_of must include a timezone")
+        cutoff = cutoff.tz_convert("UTC")
+        return bars.loc[close_times <= cutoff].reset_index(drop=True)
 
     def order_book(self, coin: str) -> dict[str, Any]:
         """Fetch one L2 order-book snapshot."""
