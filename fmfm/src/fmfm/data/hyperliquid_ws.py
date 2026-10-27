@@ -6,11 +6,9 @@ import json
 import time
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, TextIO
 
 import websockets
-
-from fmfm.data.storage import append_raw_events
 
 DEFAULT_WS_URL = "wss://api.hyperliquid.xyz/ws"
 SUPPORTED_CHANNELS = {"trades", "l2Book", "activeAssetCtx", "candle"}
@@ -41,6 +39,15 @@ def _event_record(coin: str, channel: str, payload: Any, connection_epoch: int) 
     }
 
 
+def _write_event(handle: TextIO, record: dict[str, Any], pending: int, *, flush: bool = False) -> int:
+    handle.write(json.dumps(record, ensure_ascii=False, default=str) + "\n")
+    pending += 1
+    if pending >= 100 or flush:
+        handle.flush()
+        return 0
+    return pending
+
+
 async def collect_public_stream(
     coin: str,
     output: str | Path,
@@ -64,68 +71,79 @@ async def collect_public_stream(
     subscriptions = build_subscriptions(coin, channels)
     started = time.monotonic()
     epoch = 0
+    pending = 0
     output_path = Path(output)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
 
-    while duration_seconds == 0 or time.monotonic() - started < duration_seconds:
-        try:
-            async with websockets.connect(
-                websocket_url,
-                open_timeout=15,
-                close_timeout=5,
-                ping_interval=20,
-                ping_timeout=20,
-                max_size=8 * 1024 * 1024,
-            ) as socket:
-                epoch += 1
-                append_raw_events(
-                    output_path,
-                    [_event_record(coin, "collector_connected", {"url": websocket_url}, epoch)],
-                )
-                for subscription in subscriptions:
-                    await socket.send(json.dumps({"method": "subscribe", "subscription": subscription}))
-
-                while duration_seconds == 0 or time.monotonic() - started < duration_seconds:
-                    timeout = heartbeat_seconds
-                    if duration_seconds > 0:
-                        remaining = duration_seconds - (time.monotonic() - started)
-                        if remaining <= 0:
-                            return
-                        timeout = min(timeout, remaining)
-                    try:
-                        raw_message = await asyncio.wait_for(socket.recv(), timeout=timeout)
-                    except asyncio.TimeoutError:
-                        if duration_seconds > 0 and time.monotonic() - started >= duration_seconds:
-                            return
-                        await socket.send(json.dumps({"method": "ping"}))
-                        append_raw_events(
-                            output_path,
-                            [_event_record(coin, "collector_heartbeat", {"sent": True}, epoch)],
-                        )
-                        continue
-
-                    try:
-                        message = json.loads(raw_message)
-                    except (json.JSONDecodeError, TypeError):
-                        message = {"unparsed_message": str(raw_message)}
-                    channel = str(message.get("channel", "unknown")) if isinstance(message, dict) else "unknown"
-                    append_raw_events(
-                        output_path,
-                        [_event_record(coin, channel, message, epoch)],
+    with output_path.open("a", encoding="utf-8") as event_file:
+        while duration_seconds == 0 or time.monotonic() - started < duration_seconds:
+            try:
+                async with websockets.connect(
+                    websocket_url,
+                    open_timeout=15,
+                    close_timeout=5,
+                    ping_interval=20,
+                    ping_timeout=20,
+                    max_size=8 * 1024 * 1024,
+                ) as socket:
+                    epoch += 1
+                    pending = _write_event(
+                        event_file,
+                        _event_record(coin, "collector_connected", {"url": websocket_url}, epoch),
+                        pending,
+                        flush=True,
                     )
-        except asyncio.CancelledError:
-            raise
-        except Exception as exc:
-            append_raw_events(
-                output_path,
-                [
+                    for subscription in subscriptions:
+                        await socket.send(json.dumps({"method": "subscribe", "subscription": subscription}))
+
+                    while duration_seconds == 0 or time.monotonic() - started < duration_seconds:
+                        timeout = heartbeat_seconds
+                        if duration_seconds > 0:
+                            remaining = duration_seconds - (time.monotonic() - started)
+                            if remaining <= 0:
+                                return
+                            timeout = min(timeout, remaining)
+                        try:
+                            raw_message = await asyncio.wait_for(socket.recv(), timeout=timeout)
+                        except asyncio.TimeoutError:
+                            if duration_seconds > 0 and time.monotonic() - started >= duration_seconds:
+                                return
+                            await socket.send(json.dumps({"method": "ping"}))
+                            pending = _write_event(
+                                event_file,
+                                _event_record(coin, "collector_heartbeat", {"sent": True}, epoch),
+                                pending,
+                            )
+                            continue
+
+                        try:
+                            message = json.loads(raw_message)
+                        except (json.JSONDecodeError, TypeError):
+                            message = {"unparsed_message": str(raw_message)}
+                        channel = (
+                            str(message.get("channel", "unknown"))
+                            if isinstance(message, dict)
+                            else "unknown"
+                        )
+                        pending = _write_event(
+                            event_file,
+                            _event_record(coin, channel, message, epoch),
+                            pending,
+                        )
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                pending = _write_event(
+                    event_file,
                     _event_record(
                         coin,
                         "collector_error",
                         {"error_type": type(exc).__name__, "error": str(exc)},
                         epoch,
-                    )
-                ],
-            )
-            if duration_seconds > 0 and time.monotonic() - started >= duration_seconds:
-                return
-            await asyncio.sleep(reconnect_seconds)
+                    ),
+                    pending,
+                    flush=True,
+                )
+                if duration_seconds > 0 and time.monotonic() - started >= duration_seconds:
+                    return
+                await asyncio.sleep(reconnect_seconds)
