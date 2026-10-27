@@ -39,6 +39,10 @@ FMFM 将同时研究以下期限：**1 分钟、5 分钟、15 分钟、30 分钟
 - `src/fmfm/multi_horizon.py`：按多个期限生成训练标签。
 - `src/fmfm/targets.py`：未来收益与未来波动率目标函数。
 
+## 数据校验与自动测试
+
+`src/fmfm/data/quality.py` 提供 OHLCV 完整性诊断：重复时间戳、时间顺序、缺失区间、异常 OHLC 和负成交量。诊断只报告问题，不会悄悄修复数据。`.github/workflows/fmfm-tests.yml` 配置了 Python 3.10/3.11/3.12 的自动化测试工作流；需要以 GitHub Actions 实际运行结果为准，不能仅凭工作流文件存在就认为测试通过。
+
 ## 数据落盘
 
 `src/fmfm/data/storage.py` 提供 JSONL 原始事件追加写入，以及带 UTC 时间戳、去重和原子替换的 CSV K 线存储。当前先用轻量格式建立可追溯原型；当数据量、并发和查询需求明确后，再评估 Parquet/数据库方案。
