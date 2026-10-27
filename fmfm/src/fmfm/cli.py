@@ -224,6 +224,10 @@ def command_build_features(args: argparse.Namespace) -> int:
         if "timestamp" not in funding.columns:
             raise ValueError("Funding CSV must contain a timestamp column")
         funding["timestamp"] = pd.to_datetime(funding["timestamp"], utc=True, errors="raise")
+        funding = funding.rename(columns={
+            "funding_rate": "funding_history_rate",
+            "premium": "funding_history_premium",
+        })
         features = _merge_asof_features(
             features,
             funding,
