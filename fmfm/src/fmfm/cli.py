@@ -1,0 +1,130 @@
+"""Command-line tools for reproducible FMFM data preparation."""
+from __future__ import annotations
+
+import argparse
+import json
+import sys
+from pathlib import Path
+
+import pandas as pd
+
+from fmfm.data.hyperliquid import HyperliquidPublicData
+from fmfm.data.quality import inspect_ohlcv
+from fmfm.data.storage import read_bars_csv, write_bars_csv
+from fmfm.horizons import HORIZONS, resample_ohlcv
+from fmfm.multi_horizon import build_multi_horizon_targets
+
+
+def _utc_ms(value: str) -> int:
+    stamp = pd.Timestamp(value)
+    if stamp.tzinfo is None:
+        raise argparse.ArgumentTypeError("Timestamp must include a timezone, e.g. 2026-01-01T00:00:00Z")
+    return int(stamp.tz_convert("UTC").timestamp() * 1000)
+
+
+def _write_json(path: Path, data: dict[str, object]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(data, ensure_ascii=False, indent=2, default=str) + "\n", encoding="utf-8")
+
+
+def command_fetch(args: argparse.Namespace) -> int:
+    start_ms, end_ms = _utc_ms(args.start), _utc_ms(args.end)
+    if end_ms < start_ms:
+        raise ValueError("--end must be later than or equal to --start")
+    client = HyperliquidPublicData(timeout=args.timeout)
+    bars = client.candles_range(
+        args.coin.upper(),
+        args.interval,
+        start_ms,
+        end_ms,
+        max_candles_per_request=args.chunk_size,
+    )
+    output = write_bars_csv(bars, args.output)
+    frequency = "1min" if args.interval == "1m" else None
+    report = inspect_ohlcv(bars, expected_frequency=frequency)
+    manifest = {
+        "source": "Hyperliquid public Info API",
+        "coin": args.coin.upper(),
+        "interval": args.interval,
+        "requested_start": args.start,
+        "requested_end": args.end,
+        "rows": len(bars),
+        "output": str(output),
+        "quality": report,
+        "note": "A successful API response does not guarantee complete history; inspect gaps and coverage.",
+    }
+    manifest_path = output.with_suffix(output.suffix + ".manifest.json")
+    _write_json(manifest_path, manifest)
+    print(json.dumps(manifest, ensure_ascii=False, indent=2, default=str))
+    return 0 if not bars.empty else 2
+
+
+def command_inspect(args: argparse.Namespace) -> int:
+    bars = read_bars_csv(args.input)
+    report = inspect_ohlcv(bars, expected_frequency=args.expected_frequency)
+    print(json.dumps(report, ensure_ascii=False, indent=2, default=str))
+    if report["missing_columns"] or report["null_required_values"] or report["invalid_ohlc_rows"] or report["negative_volume_rows"]:
+        return 2
+    return 0
+
+
+def command_targets(args: argparse.Namespace) -> int:
+    bars = read_bars_csv(args.input)
+    requested = tuple(args.horizons or [h.key for h in HORIZONS])
+    target_frames = build_multi_horizon_targets(bars, requested)
+    out_dir = Path(args.output_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    summary: dict[str, object] = {"input": str(args.input), "outputs": {}}
+    for horizon, labels in target_frames.items():
+        path = out_dir / f"{args.coin.upper()}_{horizon}_targets.csv"
+        labels.to_csv(path, index=False)
+        summary["outputs"][horizon] = {
+            "path": str(path),
+            "rows": len(labels),
+            "valid_forward_returns": int(labels[f"forward_log_return_{horizon}"].notna().sum()),
+        }
+    _write_json(out_dir / f"{args.coin.upper()}_targets_manifest.json", summary)
+    print(json.dumps(summary, ensure_ascii=False, indent=2))
+    return 0
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(prog="fmfm", description="FMFM read-only quant research CLI")
+    commands = parser.add_subparsers(dest="command", required=True)
+
+    fetch = commands.add_parser("fetch-candles", help="Download public Hyperliquid candles")
+    fetch.add_argument("--coin", required=True, help="Hyperliquid coin symbol, e.g. BTC")
+    fetch.add_argument("--interval", default="1m", help="Venue interval; default 1m")
+    fetch.add_argument("--start", required=True, help="Timezone-aware ISO timestamp")
+    fetch.add_argument("--end", required=True, help="Timezone-aware ISO timestamp")
+    fetch.add_argument("--output", type=Path, required=True, help="Output CSV path")
+    fetch.add_argument("--chunk-size", type=int, default=5000, help="Candles per request (1..5000)")
+    fetch.add_argument("--timeout", type=float, default=15.0)
+    fetch.set_defaults(func=command_fetch)
+
+    inspect = commands.add_parser("inspect", help="Inspect a normalized OHLCV CSV")
+    inspect.add_argument("--input", type=Path, required=True)
+    inspect.add_argument("--expected-frequency", default="1min")
+    inspect.set_defaults(func=command_inspect)
+
+    targets = commands.add_parser("build-targets", help="Build future labels for multiple horizons")
+    targets.add_argument("--coin", required=True)
+    targets.add_argument("--input", type=Path, required=True, help="Canonical fine-grained OHLCV CSV")
+    targets.add_argument("--output-dir", type=Path, required=True)
+    targets.add_argument("--horizons", nargs="*", choices=[h.key for h in HORIZONS])
+    targets.set_defaults(func=command_targets)
+    return parser
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = build_parser()
+    args = parser.parse_args(argv)
+    try:
+        return int(args.func(args))
+    except (ValueError, OSError) as exc:
+        print(f"fmfm: error: {exc}", file=sys.stderr)
+        return 2
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
