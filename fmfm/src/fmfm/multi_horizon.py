@@ -21,7 +21,7 @@ def build_multi_horizon_targets(
     for key in horizons:
         if key not in HORIZON_BY_KEY:
             raise ValueError(f"Unsupported horizon: {key}")
-        frame = resample_ohlcv(one_minute_bars, key)
+        frame = resample_ohlcv(one_minute_bars, key, drop_incomplete=True)
         close = pd.Series(frame["close"].to_numpy(), index=frame.index, dtype=float)
         high = pd.Series(frame["high"].to_numpy(), index=frame.index, dtype=float)
         low = pd.Series(frame["low"].to_numpy(), index=frame.index, dtype=float)
