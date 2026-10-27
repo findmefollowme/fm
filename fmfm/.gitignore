@@ -8,7 +8,7 @@ __pycache__/
 !.env.example
 data/raw/
 data/processed/
-models/
+artifacts/models/
 checkpoints/
 logs/
 *.parquet
