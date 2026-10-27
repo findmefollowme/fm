@@ -35,6 +35,12 @@ def test_cli_exposes_data_pipeline_commands():
     ])
     assert evaluate.command == "evaluate-ridge"
 
+    targets = parser.parse_args([
+        "build-targets", "--coin", "BTC", "--input", "daily.csv",
+        "--output-dir", "targets", "--source-interval", "1d",
+    ])
+    assert targets.source_interval == "1d"
+
 
 def test_non_finite_metrics_serialize_as_json_null():
     assert _json_safe({"metric": float("nan")}) == {"metric": None}
