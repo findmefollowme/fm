@@ -218,6 +218,7 @@ class Kronos(nn.Module, PyTorchModelHubMixin):
         self.token_dropout_p = token_dropout_p
 
         self.s1_vocab_size = 2 ** self.s1_bits
+        # s1 的类别数由比特数决定：N bit 可以表示 2**N 种 token。
         self.token_drop = nn.Dropout(self.token_dropout_p)
         self.embedding = HierarchicalEmbedding(self.s1_bits, self.s2_bits, self.d_model)
         self.time_emb = TemporalEmbedding(self.d_model, self.learn_te)
@@ -261,19 +262,24 @@ class Kronos(nn.Module, PyTorchModelHubMixin):
                 - s2_logits: Logits for s2 token predictions, conditioned on s1. Shape: [batch_size, seq_len, s2_vocab_size]
         """
         x = self.embedding([s1_ids, s2_ids])
+        # 将两个层级 token ID 查表为向量，并融合成 [B, T, d_model] 的隐藏表示。
         if stamp is not None:
+        # 时间戳特征经过 TemporalEmbedding 后与 token 表示相加，给模型补充日历上下文。
             time_embedding = self.time_emb(stamp)
             x = x + time_embedding
         x = self.token_drop(x)
 
         for layer in self.transformer:
+        # 逐层处理整段上下文；因果注意力掩码的实现位于 TransformerBlock 等底层模块中。
             x = layer(x, key_padding_mask=padding_mask)
 
         x = self.norm(x)
 
         s1_logits = self.head(x)
+        # logits 不是概率，而是每个位置对所有 s1 类别的未归一化打分；softmax 后才是概率分布。
 
         if use_teacher_forcing:
+        # teacher forcing：训练时可用真实目标 s1；否则从模型给出的 s1 分布中采样一个版本供 s2 使用。
             sibling_embed = self.embedding.emb_s1(s1_targets)
         else:
             s1_probs = F.softmax(s1_logits.detach(), dim=-1)
@@ -281,6 +287,7 @@ class Kronos(nn.Module, PyTorchModelHubMixin):
             sibling_embed = self.embedding.emb_s1(sample_s1_ids)
 
         x2 = self.dep_layer(x, sibling_embed, key_padding_mask=padding_mask) # Dependency Aware Layer: Condition on s1 embeddings
+        # 关键依赖关系：s2 预测不仅看历史上下文，还显式看 s1 的嵌入。
         s2_logits = self.head.cond_forward(x2)
         return s1_logits, s2_logits
 
@@ -382,7 +389,9 @@ def top_k_top_p_filtering(
 
 
 def sample_from_logits(logits, temperature=1.0, top_k=None, top_p=None, sample_logits=True):
+    # 将 logits 转成 token：temperature 控制随机程度，top_k/top_p 限制候选集合。
     logits = logits / temperature
+    # 温度越低分布通常越尖锐；温度越高通常越随机。temperature 应大于 0。
     if top_k is not None or top_p is not None:
         if top_k > 0 or top_p < 1.0:
             logits = top_k_top_p_filtering(logits, top_k=top_k, top_p=top_p)
@@ -399,6 +408,7 @@ def sample_from_logits(logits, temperature=1.0, top_k=None, top_p=None, sample_l
 
 # 【中文导读】自回归生成主循环：每一步生成未来一个时间点的 token，重复 pred_len 次后再解码成行情。
 def auto_regressive_inference(tokenizer, model, x, x_stamp, y_stamp, max_context, pred_len, clip=5, T=1.0, top_k=0, top_p=0.99, sample_count=5, verbose=False):
+    # 推理入口：x 是已归一化的历史行情，x_stamp 是历史时间特征，y_stamp 是未来时间特征。
     with torch.no_grad():
         x = torch.clip(x, -clip, clip)
 
@@ -408,6 +418,7 @@ def auto_regressive_inference(tokenizer, model, x, x_stamp, y_stamp, max_context
         y_stamp = y_stamp.unsqueeze(1).repeat(1, sample_count, 1, 1).reshape(-1, y_stamp.size(1), y_stamp.size(2)).to(device)
 
         x_token = tokenizer.encode(x, half=True)
+        # 历史连续行情先转成两路离散 token；half=True 对应模型使用的分层/分半 token 形式。
         
         initial_seq_len = x.size(1)
         batch_size = x_token[0].size(0)
@@ -415,6 +426,7 @@ def auto_regressive_inference(tokenizer, model, x, x_stamp, y_stamp, max_context
         full_stamp = torch.cat([x_stamp, y_stamp], dim=1)
 
         generated_pre = x_token[0].new_empty(batch_size, pred_len)
+        # 预分配未来 s1/s2 token 存储区，形状都是 [扩展后的批次, 预测步数]。
         generated_post = x_token[1].new_empty(batch_size, pred_len)
 
         pre_buffer = x_token[0].new_zeros(batch_size, max_context)
@@ -446,17 +458,21 @@ def auto_regressive_inference(tokenizer, model, x, x_stamp, y_stamp, max_context
             current_stamp = full_stamp[:, context_start:context_end, :].contiguous()
 
             s1_logits, context = model.decode_s1(input_tokens[0], input_tokens[1], current_stamp)
+            # 用当前可见历史计算上下文，并只取最后一个位置的 logits 来预测下一个时间点。
             s1_logits = s1_logits[:, -1, :]
             sample_pre = sample_from_logits(s1_logits, temperature=T, top_k=top_k, top_p=top_p, sample_logits=True)
+            # 先采样未来 s1 token；下一步 s2 的生成依赖它。
 
             s2_logits = model.decode_s2(context, sample_pre)
             s2_logits = s2_logits[:, -1, :]
             sample_post = sample_from_logits(s2_logits, temperature=T, top_k=top_k, top_p=top_p, sample_logits=True)
+            # 在已采样的 s1 条件下再采样 s2，完成当前时间点的层级 token。
 
             generated_pre[:, i] = sample_pre.squeeze(-1)
             generated_post[:, i] = sample_post.squeeze(-1)
 
             if current_seq_len < max_context:
+            # 上下文未满时直接追加；达到窗口上限后滚动缓存，始终只保留最近 max_context 个时间点。
                 pre_buffer[:, current_seq_len] = sample_pre.squeeze(-1)
                 post_buffer[:, current_seq_len] = sample_post.squeeze(-1)
             else:
@@ -474,14 +490,17 @@ def auto_regressive_inference(tokenizer, model, x, x_stamp, y_stamp, max_context
             full_post[:, context_start:total_seq_len].contiguous()
         ]
         z = tokenizer.decode(input_tokens, half=True)
+        # 将历史 token 与生成 token 合并后解码；解码窗口只保留末尾 max_context 个位置。
         z = z.reshape(-1, sample_count, z.size(1), z.size(2))
         preds = z.cpu().numpy()
         preds = np.mean(preds, axis=1)
+        # 对每条输入的 sample_count 条随机生成路径求均值；这不是校准过的置信区间。
 
         return preds
 
 
 def calc_time_stamps(x_timestamp):
+    # 将时间戳拆成模型使用的五类日历特征：分钟、小时、星期、日、月。
     time_df = pd.DataFrame()
     time_df['minute'] = x_timestamp.dt.minute
     time_df['hour'] = x_timestamp.dt.hour
@@ -529,6 +548,7 @@ class KronosPredictor:
         return preds
 
     def predict(self, df, x_timestamp, y_timestamp, pred_len, T=1.0, top_k=0, top_p=0.9, sample_count=1, verbose=True):
+        # 用户侧预测接口：校验 OHLCV 数据、归一化、调用生成器，再把输出反归一化成原始量纲。
 
         if not isinstance(df, pd.DataFrame):
             raise ValueError("Input must be a pandas DataFrame.")
@@ -554,6 +574,7 @@ class KronosPredictor:
         y_stamp = y_time_df.values.astype(np.float32)
 
         x_mean, x_std = np.mean(x, axis=0), np.std(x, axis=0)
+        # 每个特征分别用历史窗口的均值/标准差标准化；输出时必须用同一组统计量还原。
 
         x = (x - x_mean) / (x_std + 1e-5)
         x = np.clip(x, -self.clip, self.clip)
@@ -566,6 +587,7 @@ class KronosPredictor:
 
         preds = preds.squeeze(0)
         preds = preds * (x_std + 1e-5) + x_mean
+        # 反归一化，把模型空间中的数值还原为输入数据的价格/成交量/成交额量纲。
 
         pred_df = pd.DataFrame(preds, columns=self.price_cols + [self.vol_col, self.amt_vol], index=y_timestamp)
         return pred_df
