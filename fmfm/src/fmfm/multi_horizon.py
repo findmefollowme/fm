@@ -46,5 +46,11 @@ def build_multi_horizon_targets(
         labels = pd.DataFrame(index=frame.index)
         labels[f"forward_log_return_{key}"] = returns
         labels[f"forward_range_volatility_{key}"] = range_volatility
-        outputs[key] = labels.reset_index(drop=True).assign(timestamp=frame["timestamp"].to_numpy())
+        if key == "1mo":
+            forecast_time = pd.to_datetime(frame["timestamp"], utc=True) + pd.DateOffset(months=1)
+        else:
+            forecast_time = pd.to_datetime(frame["timestamp"], utc=True) + pd.to_timedelta(
+                HORIZON_BY_KEY[key].minutes, unit="min"
+            )
+        outputs[key] = labels.reset_index(drop=True).assign(timestamp=forecast_time.to_numpy())
     return outputs
