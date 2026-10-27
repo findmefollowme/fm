@@ -16,7 +16,7 @@ from fmfm.data.hyperliquid_ws import SUPPORTED_CHANNELS, collect_public_stream
 from fmfm.data.quality import inspect_ohlcv
 from fmfm.data.storage import read_bars_csv, write_bars_csv
 from fmfm.features.flow import candle_flow_features
-from fmfm.horizons import HORIZONS
+from fmfm.horizons import HORIZON_BY_KEY, HORIZONS
 from fmfm.models.walk_forward import regression_metrics, walk_forward_ridge
 from fmfm.multi_horizon import build_multi_horizon_targets
 
@@ -56,6 +56,7 @@ def command_fetch(args: argparse.Namespace) -> int:
         end_ms,
         max_candles_per_request=args.chunk_size,
     )
+    bars = client.drop_unclosed_candles(bars, args.interval)
     output = write_bars_csv(bars, args.output)
     frequency = "1min" if args.interval == "1m" else None
     report = inspect_ohlcv(bars, expected_frequency=frequency)
@@ -125,8 +126,22 @@ def command_inspect(args: argparse.Namespace) -> int:
 
 def command_targets(args: argparse.Namespace) -> int:
     bars = read_bars_csv(args.input)
-    requested = tuple(args.horizons or [h.key for h in HORIZONS])
-    target_frames = build_multi_horizon_targets(bars, requested)
+    source_interval = args.source_interval
+    if args.horizons:
+        requested = tuple(args.horizons)
+    elif source_interval == "1mo":
+        requested = ("1mo",)
+    elif source_interval == "1w":
+        requested = ("1w",)
+    else:
+        source_minutes = HORIZON_BY_KEY[source_interval].minutes
+        requested = tuple(
+            h.key for h in HORIZONS
+            if h.minutes is None or (source_minutes is not None and h.minutes >= source_minutes)
+        )
+    target_frames = build_multi_horizon_targets(
+        bars, requested, source_interval=source_interval
+    )
     out_dir = Path(args.output_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     summary: dict[str, object] = {"input": str(args.input), "outputs": {}}
@@ -250,6 +265,7 @@ def build_parser() -> argparse.ArgumentParser:
     targets.add_argument("--coin", required=True)
     targets.add_argument("--input", type=Path, required=True, help="Canonical fine-grained OHLCV CSV")
     targets.add_argument("--output-dir", type=Path, required=True)
+    targets.add_argument("--source-interval", choices=[h.key for h in HORIZONS], default="1m")
     targets.add_argument("--horizons", nargs="*", choices=[h.key for h in HORIZONS])
     targets.set_defaults(func=command_targets)
     return parser
