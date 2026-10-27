@@ -112,7 +112,13 @@ FMFM 将同时研究以下期限：**1 分钟、5 分钟、15 分钟、30 分钟
     fmfm build-targets --coin BTC --input data/BTC_1m.csv --source-interval 1m --horizons 1m 5m 15m 30m 1h 2h 4h --output-dir data/targets_intraday
     fmfm evaluate-ridge --features data/BTC_features.csv --targets data/targets_intraday/BTC_1m_targets.csv --target-column forward_log_return_1m --output data/BTC_1m_predictions.csv --min-train-size 500 --test-size 100
 
-Ridge 基线采用扩展窗口训练、按时间向前预测，并只在训练集上拟合特征标准化参数。输出包括 MAE、RMSE、零收益基线 MAE、方向准确率和相关性。它只评估点预测，不等于可盈利交易策略；下一步还要用真实成本、资金费率和滑点做交易层回测。
+Ridge 基线采用扩展窗口训练、按时间向前预测，并只在训练集上拟合特征标准化参数。特征和标签均按 K 线收盘时刻对齐：一根 1 分钟 K 线在其收盘时间才可用。输出包括 MAE、RMSE、零收益基线 MAE、方向准确率和相关性。它只评估点预测，不等于可盈利交易策略；下一步还要用真实成本、资金费率和滑点做交易层回测。
+
+如已积累与历史 K 线时间重叠的原始公开事件，可额外生成资金流增强特征：
+
+    fmfm build-features --input data/BTC_1m.csv --source-interval 1m --events data/raw/BTC_events.jsonl --funding data/BTC_funding.csv --coin BTC --output data/BTC_flow_features.csv
+
+该命令将真实成交按分钟聚合，并把盘口/合约状态按“当时已观察到的最近值”向后对齐。事件流只覆盖采集开始后的时段，因此旧 K 线通常没有这些特征；训练前要检查缺失覆盖率，不能把缺失值伪装成零资金流。Hyperliquid 的成交 side 字段中，B 表示主动买方、A 表示主动卖方，具体语义以官方 API 说明为准。
 
 ## 重要限制
 
