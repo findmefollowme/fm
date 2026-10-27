@@ -64,7 +64,7 @@ def resample_ohlcv(
     if missing:
         raise ValueError(f"Missing OHLCV columns: {sorted(missing)}")
     if bars.empty:
-        return pd.DataFrame(columns=[*OHLCV_AGGREGATION]).rename_axis(timestamp_col)
+        return pd.DataFrame(columns=[timestamp_col, *OHLCV_AGGREGATION])
 
     frame = bars.copy()
     if timestamp_col in frame.columns:
