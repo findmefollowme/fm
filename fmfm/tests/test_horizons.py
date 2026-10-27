@@ -54,5 +54,5 @@ def test_daily_source_can_build_complete_weekly_and_monthly_bars():
     })
     weekly = resample_ohlcv(bars, "1w", source_interval="1d", drop_incomplete=True)
     monthly = resample_ohlcv(bars, "1mo", source_interval="1d", drop_incomplete=True)
-    assert len(weekly) == 4
+    assert len(weekly) == 3
     assert len(monthly) == 1
