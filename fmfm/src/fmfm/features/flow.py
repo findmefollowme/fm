@@ -54,7 +54,9 @@ def trade_flow_features(trades: pd.DataFrame) -> pd.DataFrame:
     data["signed_notional"] = signed * data["size"] * data["price"]
     data["notional"] = data["size"] * data["price"]
     data = data.set_index("timestamp").sort_index()
-    return data[["signed_notional", "notional"]].resample("1min").sum(min_count=1).rename(
+    return data[["signed_notional", "notional"]].resample(
+        "1min", label="right", closed="left"
+    ).sum(min_count=1).rename(
         columns={"signed_notional": "net_aggressive_notional", "notional": "total_notional"}
     )
 
