@@ -77,23 +77,29 @@ FMFM 将同时研究以下期限：**1 分钟、5 分钟、15 分钟、30 分钟
 
 程序会保存 CSV 和对应的 JSON manifest，并输出数据质量报告。官方 API 的 K 线历史只有最近 5000 根；此示例时间范围约 3 天，适用于 1 分钟线。更久远的数据需要历史归档或从现在开始持续采集。
 
-### 2. 下载历史资金费率
+### 2. 开始采集实时公开市场事件
+
+    fmfm collect-live --coin BTC --output data/raw/BTC_events.jsonl --duration-seconds 3600
+
+这会订阅公开成交、L2 盘口、合约上下文和 1 分钟 K 线，将原始消息以 JSONL 追加保存。若希望持续运行直到手动中断，省略 `--duration-seconds`。程序会记录连接、心跳与错误事件；断线重连不等于保证零缺口，必须将连接中断作为数据质量标记。此命令不需要钱包地址、私钥或交易权限。
+
+### 3. 下载历史资金费率
 
     fmfm fetch-funding --coin BTC --start 2026-01-01T00:00:00Z --end 2026-01-08T00:00:00Z --output data/BTC_funding.csv
 
 资金费率作为独立时间序列存储，后续应按时间对齐到各 K 线周期；不允许把未来时点的费率泄漏到当前特征中。
 
-### 3. 检查已有数据
+### 4. 检查已有数据
 
     fmfm inspect --input data/BTC_1m.csv --expected-frequency 1min
 
-### 4. 生成多周期训练标签
+### 5. 生成多周期训练标签
 
     fmfm build-targets --coin BTC --input data/BTC_1m.csv --output-dir data/targets
 
 默认生成 1m、5m、15m、30m、1h、2h、4h、1d、1w 和 1mo 的未来收益/区间波动率标签。为避免把不完整聚合 K 线作为训练样本，固定周期只保留完整时间桶；月线需要完整的分钟覆盖才保留。标签仅供训练/评估，禁止作为同一时点输入特征。
 
-### 5. 生成特征并评估一个简单的样本外预测基线
+### 6. 生成特征并评估一个简单的样本外预测基线
 
     fmfm build-features --input data/BTC_1m.csv --output data/BTC_features.csv
     fmfm build-targets --coin BTC --input data/BTC_1m.csv --output-dir data/targets
