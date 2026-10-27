@@ -1,7 +1,7 @@
 import numpy as np
 import pandas as pd
 
-from fmfm.targets import forward_log_return, forward_realized_volatility
+from fmfm.targets import forward_log_return, forward_realized_volatility, forward_range_volatility
 
 
 def test_forward_log_return_is_future_only():
@@ -16,4 +16,12 @@ def test_forward_volatility_uses_next_returns():
     got = forward_realized_volatility(close, 2)
     expected = np.sqrt(np.log(0.9) ** 2 + np.log(1.1) ** 2)
     assert np.isclose(got.iloc[1], expected)
+    assert np.isnan(got.iloc[-1])
+
+
+def test_forward_range_volatility_uses_future_high_low():
+    high = pd.Series([101.0, 120.0, 110.0])
+    low = pd.Series([99.0, 100.0, 105.0])
+    got = forward_range_volatility(high, low)
+    assert np.isclose(got.iloc[0], np.sqrt(np.log(1.2) ** 2 / (4 * np.log(2))))
     assert np.isnan(got.iloc[-1])
