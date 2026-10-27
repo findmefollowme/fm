@@ -40,3 +40,19 @@ def test_empty_resample_preserves_timestamp_schema():
     result = resample_ohlcv(bars, "5m")
     assert "timestamp" in result.columns
     assert result.empty
+
+
+def test_daily_source_can_build_complete_weekly_and_monthly_bars():
+    daily_times = pd.date_range("2026-02-01", periods=28, freq="D", tz="UTC")
+    bars = pd.DataFrame({
+        "timestamp": daily_times,
+        "open": range(100, 128),
+        "high": range(101, 129),
+        "low": range(99, 127),
+        "close": range(100, 128),
+        "volume": [1.0] * 28,
+    })
+    weekly = resample_ohlcv(bars, "1w", source_interval="1d", drop_incomplete=True)
+    monthly = resample_ohlcv(bars, "1mo", source_interval="1d", drop_incomplete=True)
+    assert len(weekly) == 4
+    assert len(monthly) == 1
