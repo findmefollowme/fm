@@ -98,7 +98,7 @@ def main() -> int:
     report = {
         "run_id_utc": run_id,
         "coin": coin,
-        "status": "data_files_created" if len(bars) > 0 and event_total > 0 else "incomplete",
+        "status": "market_messages_received" if len(bars) > 0 and channel_counts["trades"] > 0 and channel_counts["candle"] > 0 else "incomplete",
         "note": "This report verifies local files and received messages, not gap-free coverage or predictive value.",
         "files": {
             "candles_csv": str(candle_path),
@@ -125,7 +125,7 @@ def main() -> int:
     print("\n=== LOCAL COLLECTION REPORT ===")
     print(json.dumps(report, ensure_ascii=False, indent=2))
     print(f"Report saved to: {report_path}")
-    return 0 if report["status"] == "data_files_created" else 2
+    return 0 if report["status"] == "market_messages_received" else 2
 
 
 if __name__ == "__main__":
