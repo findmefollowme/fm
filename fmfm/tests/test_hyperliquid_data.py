@@ -1,4 +1,3 @@
-import pandas as pd
 import pytest
 
 from fmfm.data.hyperliquid import HyperliquidPublicData
