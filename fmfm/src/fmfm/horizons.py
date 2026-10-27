@@ -67,6 +67,8 @@ def resample_ohlcv(
     target_minutes = HORIZON_BY_KEY[horizon].minutes
     if source_minutes is None and horizon != "1mo":
         raise ValueError("Monthly source bars can only build monthly targets")
+    if source_interval == "1w" and horizon == "1mo":
+        raise ValueError("Use daily source bars for monthly targets; weekly bars cross calendar-month boundaries")
     if source_minutes is not None and target_minutes is not None and target_minutes < source_minutes:
         raise ValueError(f"Target {horizon} is shorter than source interval {source_interval}")
     if bars.empty:
