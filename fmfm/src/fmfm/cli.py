@@ -6,12 +6,13 @@ import json
 import sys
 from pathlib import Path
 
+import httpx
 import pandas as pd
 
 from fmfm.data.hyperliquid import HyperliquidPublicData
 from fmfm.data.quality import inspect_ohlcv
 from fmfm.data.storage import read_bars_csv, write_bars_csv
-from fmfm.horizons import HORIZONS, resample_ohlcv
+from fmfm.horizons import HORIZONS
 from fmfm.multi_horizon import build_multi_horizon_targets
 
 
@@ -121,7 +122,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     try:
         return int(args.func(args))
-    except (ValueError, OSError) as exc:
+    except (ValueError, OSError, httpx.HTTPError) as exc:
         print(f"fmfm: error: {exc}", file=sys.stderr)
         return 2
 
