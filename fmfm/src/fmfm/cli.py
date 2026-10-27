@@ -161,7 +161,14 @@ def command_targets(args: argparse.Namespace) -> int:
 def command_build_features(args: argparse.Namespace) -> int:
     bars = read_bars_csv(args.input)
     features = candle_flow_features(bars)
-    features.insert(0, "timestamp", bars["timestamp"].to_numpy())
+    source_interval = args.source_interval
+    if source_interval == "1mo":
+        feature_time = pd.to_datetime(bars["timestamp"], utc=True) + pd.DateOffset(months=1)
+    else:
+        feature_time = pd.to_datetime(bars["timestamp"], utc=True) + pd.to_timedelta(
+            HORIZON_BY_KEY[source_interval].minutes, unit="min"
+        )
+    features.insert(0, "timestamp", feature_time.to_numpy())
     output = Path(args.output)
     output.parent.mkdir(parents=True, exist_ok=True)
     features.to_csv(output, index=False)
@@ -248,6 +255,7 @@ def build_parser() -> argparse.ArgumentParser:
     features = commands.add_parser("build-features", help="Build OHLCV-derived flow proxy features")
     features.add_argument("--input", type=Path, required=True)
     features.add_argument("--output", type=Path, required=True)
+    features.add_argument("--source-interval", choices=[h.key for h in HORIZONS], default="1m")
     features.set_defaults(func=command_build_features)
 
     evaluate = commands.add_parser("evaluate-ridge", help="Run expanding-window ridge forecast evaluation")
