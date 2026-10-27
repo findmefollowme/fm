@@ -22,7 +22,7 @@ from fmfm.multi_horizon import build_multi_horizon_targets
 def _utc_ms(value: str) -> int:
     stamp = pd.Timestamp(value)
     if stamp.tzinfo is None:
-        raise argparse.ArgumentTypeError("Timestamp must include a timezone, e.g. 2026-01-01T00:00:00Z")
+        raise ValueError("Timestamp must include a timezone, e.g. 2026-01-01T00:00:00Z")
     return int(stamp.tz_convert("UTC").timestamp() * 1000)
 
 
@@ -99,7 +99,7 @@ def command_fetch_funding(args: argparse.Namespace) -> int:
 
 
 def command_inspect(args: argparse.Namespace) -> int:
-    bars = read_bars_csv(args.input)
+    bars = pd.read_csv(args.input)
     report = inspect_ohlcv(bars, expected_frequency=args.expected_frequency)
     print(json.dumps(report, ensure_ascii=False, indent=2, default=str))
     if report["missing_columns"] or report["null_required_values"] or report["invalid_ohlc_rows"] or report["negative_volume_rows"]:
