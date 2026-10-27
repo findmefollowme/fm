@@ -14,7 +14,7 @@ def inspect_ohlcv(
     required = {"open", "high", "low", "close", "volume"}
     missing_columns = sorted(required - set(bars.columns))
     report: dict[str, object] = {
-        "row_count": int(len(bars)),
+        "row_count": len(bars),
         "missing_columns": missing_columns,
         "duplicate_timestamps": 0,
         "non_monotonic_timestamps": False,
