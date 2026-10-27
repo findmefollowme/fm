@@ -22,6 +22,8 @@ def test_multi_horizon_targets_include_requested_periods():
     result = build_multi_horizon_targets(_bars(timestamps), horizons=("1m", "5m"))
     assert len(result["1m"]) == 10
     assert len(result["5m"]) == 2
+    assert result["1m"]["timestamp"].iloc[0] == pd.Timestamp("2026-01-01T00:01:00Z")
+    assert result["5m"]["timestamp"].iloc[0] == pd.Timestamp("2026-01-01T00:05:00Z")
     assert "forward_log_return_5m" in result["5m"]
     assert "forward_range_volatility_5m" in result["5m"]
     assert np.isnan(result["5m"]["forward_log_return_5m"].iloc[-1])
