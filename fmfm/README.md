@@ -58,7 +58,7 @@ FMFM 将同时研究以下期限：**1 分钟、5 分钟、15 分钟、30 分钟
 
 ## 第一阶段的数据源：Hyperliquid
 
-官方 Info API 支持查询 K 线快照和 L2 订单簿等信息，WebSocket 支持实时订阅行情与成交。历史 K 线端点有每次最多返回 5000 根的限制；抓取时应按时间范围分页，并在断线后补齐缺口。参见 [Info endpoint](https://hyperliquid.gitbook.io/Hyperliquid-docs/for-developers/api/info-endpoint) 和 [WebSocket](https://hyperliquid.gitbook.io/Hyperliquid-docs/for-developers/api/websocket)。
+官方 Info API 支持查询 K 线快照、L2 订单簿、历史资金费率和当前合约状态。**官方文档说明 K 线历史只提供最近 5000 根**，把请求切段不能获取更久远的历史；适配器会拒绝超过 5000 根的请求。资金费率历史使用时间戳分页；当前 open interest 等合约状态是快照，不是历史序列，需要持续采集才能形成历史。WebSocket 适合从现在开始持续保存公开成交和行情事件。参见 [Info endpoint](https://hyperliquid.gitbook.io/Hyperliquid-docs/for-developers/api/info-endpoint) 和 [WebSocket](https://hyperliquid.gitbook.io/Hyperliquid-docs/for-developers/api/websocket)。
 
 ## 安装与数据准备
 
@@ -77,11 +77,17 @@ FMFM 将同时研究以下期限：**1 分钟、5 分钟、15 分钟、30 分钟
 
 程序会保存 CSV 和对应的 JSON manifest，并输出数据质量报告。API 可用性、历史覆盖和缺口仍需检查；不能假设指定时间范围一定返回完整数据。
 
-### 2. 检查已有数据
+### 2. 下载历史资金费率
+
+    fmfm fetch-funding --coin BTC --start 2026-01-01T00:00:00Z --end 2026-01-08T00:00:00Z --output data/BTC_funding.csv
+
+资金费率作为独立时间序列存储，后续应按时间对齐到各 K 线周期；不允许把未来时点的费率泄漏到当前特征中。
+
+### 3. 检查已有数据
 
     fmfm inspect --input data/BTC_1m.csv --expected-frequency 1min
 
-### 3. 生成多周期训练标签
+### 4. 生成多周期训练标签
 
     fmfm build-targets --coin BTC --input data/BTC_1m.csv --output-dir data/targets
 
