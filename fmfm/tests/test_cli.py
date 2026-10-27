@@ -1,6 +1,8 @@
-from fmfm.cli import _utc_ms, build_parser
+import argparse
 
 import pytest
+
+from fmfm.cli import _utc_ms, build_parser
 
 
 def test_cli_exposes_data_pipeline_commands():
@@ -15,5 +17,5 @@ def test_cli_exposes_data_pipeline_commands():
 
 
 def test_utc_ms_requires_timezone():
-    with pytest.raises(Exception):
+    with pytest.raises(argparse.ArgumentTypeError):
         _utc_ms("2026-01-01 00:00:00")
