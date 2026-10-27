@@ -74,3 +74,30 @@ def test_current_asset_contexts_uses_public_info_endpoint(monkeypatch):
     client = HyperliquidPublicData()
     monkeypatch.setattr(client, "_post_info", lambda payload: {"type": payload["type"]})
     assert client.meta_and_asset_contexts()["type"] == "metaAndAssetCtxs"
+
+
+def test_monthly_candle_request_uses_calendar_interval(monkeypatch):
+    client = HyperliquidPublicData()
+    monkeypatch.setattr(client, "candles", lambda coin, interval, start_ms, end_ms: pd.DataFrame({
+        "timestamp": [pd.Timestamp("2026-01-01T00:00:00Z")],
+        "open": [1], "high": [2], "low": [0.5], "close": [1.5], "volume": [10], "trades": [3],
+    }))
+    result = client.candles_range(
+        "BTC", "1M",
+        int(pd.Timestamp("2026-01-01T00:00:00Z").timestamp() * 1000),
+        int(pd.Timestamp("2026-03-01T00:00:00Z").timestamp() * 1000),
+    )
+    assert len(result) == 1
+
+
+def test_drop_unclosed_candles_removes_current_bar():
+    bars = pd.DataFrame({
+        "timestamp": pd.to_datetime(["2026-01-01T00:00:00Z", "2026-01-01T00:01:00Z"]),
+        "open": [100, 101], "high": [101, 102], "low": [99, 100],
+        "close": [100, 101], "volume": [1, 1], "trades": [1, 1],
+    })
+    result = HyperliquidPublicData.drop_unclosed_candles(
+        bars, "1m", as_of=pd.Timestamp("2026-01-01T00:01:30Z")
+    )
+    assert len(result) == 1
+    assert result.iloc[0]["close"] == 100
