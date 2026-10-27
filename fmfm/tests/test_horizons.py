@@ -33,3 +33,10 @@ def test_resample_one_minute_bars_to_five_minutes():
 def test_unknown_horizon_fails_explicitly():
     with pytest.raises(ValueError):
         resample_ohlcv(pd.DataFrame(), "7m")
+
+
+def test_empty_resample_preserves_timestamp_schema():
+    bars = pd.DataFrame(columns=["timestamp", "open", "high", "low", "close", "volume"])
+    result = resample_ohlcv(bars, "5m")
+    assert "timestamp" in result.columns
+    assert result.empty
