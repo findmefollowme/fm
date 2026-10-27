@@ -51,7 +51,8 @@ FMFM 将同时研究以下期限：**1 分钟、5 分钟、15 分钟、30 分钟
 
     fmfm/
       src/fmfm/data/       # 交易场所公开数据适配器
-      src/fmfm/features/   # 资金流和微观结构特征
+      src/fmfm/features/   # K线代理特征和真实成交资金流
+      src/fmfm/models/     # 扩展窗口预测基线
       src/fmfm/signals/    # 可解释基线信号
       src/fmfm/backtest/   # 费用后回测
       tests/
