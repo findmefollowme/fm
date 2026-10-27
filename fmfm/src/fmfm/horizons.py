@@ -1,9 +1,8 @@
 """Canonical prediction horizons for FMFM.
 
-The model can forecast multiple horizons from one canonical time-indexed OHLCV
-dataset. Intraday bars are resampled from 1-minute data; longer bars are
-resampled with explicit UTC boundaries. This does not imply every venue has
-complete 1-minute history.
+The model can forecast multiple horizons from a chosen source-bar interval.
+Intraday bars are resampled from fine-grained data; daily bars can build
+weekly/monthly targets when the minute-level history window is too short.
 """
 from __future__ import annotations
 
@@ -49,22 +48,34 @@ def resample_ohlcv(
     horizon: str,
     *,
     timestamp_col: str = "timestamp",
+    source_interval: str = "1m",
     drop_incomplete: bool = False,
 ) -> pd.DataFrame:
     """Resample OHLCV bars to a supported horizon using UTC timestamps.
 
-    Input timestamps represent the opening time of each source bar. Empty
-    buckets are omitted rather than forward-filled. A monthly horizon is
-    calendar-based, so its elapsed duration varies.
+    Input timestamps represent each source bar's opening time. Completeness
+    checks assume continuous source bars at source_interval; gaps are not
+    forward-filled. Calendar-month bars use real calendar boundaries.
     """
     if horizon not in HORIZON_BY_KEY:
         raise ValueError(f"Unsupported horizon {horizon!r}; choose from {tuple(HORIZON_BY_KEY)}")
+    if source_interval not in HORIZON_BY_KEY:
+        raise ValueError(
+            f"Unsupported source interval {source_interval!r}; choose from {tuple(HORIZON_BY_KEY)}"
+        )
+    source_minutes = HORIZON_BY_KEY[source_interval].minutes
+    target_minutes = HORIZON_BY_KEY[horizon].minutes
+    if source_minutes is None and horizon != "1mo":
+        raise ValueError("Monthly source bars can only build monthly targets")
+    if source_minutes is not None and target_minutes is not None and target_minutes < source_minutes:
+        raise ValueError(f"Target {horizon} is shorter than source interval {source_interval}")
+    if bars.empty:
+        return pd.DataFrame(columns=[timestamp_col, *OHLCV_AGGREGATION])
+
     required = {"open", "high", "low", "close", "volume"}
     missing = required - set(bars.columns)
     if missing:
         raise ValueError(f"Missing OHLCV columns: {sorted(missing)}")
-    if bars.empty:
-        return pd.DataFrame(columns=[timestamp_col, *OHLCV_AGGREGATION])
 
     frame = bars.copy()
     if timestamp_col in frame.columns:
@@ -82,24 +93,25 @@ def resample_ohlcv(
     agg = {key: value for key, value in OHLCV_AGGREGATION.items() if key in frame.columns}
     result = frame.resample(HORIZON_BY_KEY[horizon].pandas_rule, label="left", closed="left").agg(agg)
     result = result.dropna(subset=["open", "high", "low", "close"])
-    if drop_incomplete and not result.empty and horizon != "1m":
-        # This completeness check assumes the canonical source is 1-minute bars.
+
+    if drop_incomplete and not result.empty and horizon != source_interval and source_minutes:
         counts = frame["close"].resample(
             HORIZON_BY_KEY[horizon].pandas_rule, label="left", closed="left"
         ).count()
         expected: dict[pd.Timestamp, int] = {}
-        if horizon == "1mo":
-            for bucket in result.index:
+        for bucket in result.index:
+            if target_minutes is not None:
+                expected_count = target_minutes // source_minutes
+            else:
                 next_bucket = bucket + pd.DateOffset(months=1)
-                expected[bucket] = int((next_bucket - bucket).total_seconds() // 60)
-        else:
-            expected_count = HORIZON_BY_KEY[horizon].minutes
-            if expected_count is not None:
-                expected = {bucket: expected_count for bucket in result.index}
+                month_minutes = int((next_bucket - bucket).total_seconds() // 60)
+                expected_count = month_minutes // source_minutes
+            expected[bucket] = expected_count
         expected_series = pd.Series(expected, dtype="int64")
         actual = counts.reindex(result.index).fillna(0).astype("int64")
-        required = expected_series.reindex(result.index).fillna(0)
-        result = result.loc[actual >= required]
+        required_counts = expected_series.reindex(result.index).fillna(0)
+        result = result.loc[actual >= required_counts]
+
     return result.rename_axis(timestamp_col).reset_index()
 
 
