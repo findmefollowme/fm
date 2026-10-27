@@ -21,6 +21,15 @@ def test_cli_exposes_data_pipeline_commands():
     ])
     assert funding.command == "fetch-funding"
 
+    features = parser.parse_args(["build-features", "--input", "bars.csv", "--output", "features.csv"])
+    assert features.command == "build-features"
+
+    evaluate = parser.parse_args([
+        "evaluate-ridge", "--features", "features.csv", "--targets", "targets.csv",
+        "--target-column", "forward_log_return_5m", "--output", "predictions.csv",
+    ])
+    assert evaluate.command == "evaluate-ridge"
+
 
 def test_utc_ms_requires_timezone():
     with pytest.raises(argparse.ArgumentTypeError):
