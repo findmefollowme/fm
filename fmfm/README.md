@@ -60,7 +60,7 @@ FMFM 将同时研究以下期限：**1 分钟、5 分钟、15 分钟、30 分钟
 
 官方 Info API 支持查询 K 线快照和 L2 订单簿等信息，WebSocket 支持实时订阅行情与成交。历史 K 线端点有每次最多返回 5000 根的限制；抓取时应按时间范围分页，并在断线后补齐缺口。参见 [Info endpoint](https://hyperliquid.gitbook.io/Hyperliquid-docs/for-developers/api/info-endpoint) 和 [WebSocket](https://hyperliquid.gitbook.io/Hyperliquid-docs/for-developers/api/websocket)。
 
-## 安装（开发中）
+## 安装与数据准备
 
     cd fmfm
     python -m venv .venv
@@ -68,6 +68,24 @@ FMFM 将同时研究以下期限：**1 分钟、5 分钟、15 分钟、30 分钟
     # macOS/Linux: source .venv/bin/activate
     pip install -e ".[dev]"
     pytest
+
+### 1. 下载 Hyperliquid 公开 K 线
+
+时间必须包含时区，建议使用 UTC。示例下载 BTC 的一段 1 分钟历史数据：
+
+    fmfm fetch-candles --coin BTC --interval 1m --start 2026-01-01T00:00:00Z --end 2026-01-08T00:00:00Z --output data/BTC_1m.csv
+
+程序会保存 CSV 和对应的 JSON manifest，并输出数据质量报告。API 可用性、历史覆盖和缺口仍需检查；不能假设指定时间范围一定返回完整数据。
+
+### 2. 检查已有数据
+
+    fmfm inspect --input data/BTC_1m.csv --expected-frequency 1min
+
+### 3. 生成多周期训练标签
+
+    fmfm build-targets --coin BTC --input data/BTC_1m.csv --output-dir data/targets
+
+默认生成 1m、5m、15m、30m、1h、2h、4h、1d、1w 和 1mo 的未来收益/区间波动率标签。为避免把不完整聚合 K 线作为训练样本，固定周期只保留完整时间桶；月线需要完整的分钟覆盖才保留。标签仅供训练/评估，禁止作为同一时点输入特征。
 
 ## 重要限制
 
