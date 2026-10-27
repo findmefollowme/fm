@@ -21,3 +21,16 @@ def test_quality_detects_bad_rows_duplicates_and_gaps():
     assert report["invalid_ohlc_rows"] == 1
     assert report["negative_volume_rows"] == 1
     assert report["missing_intervals"] >= 1
+
+
+def test_quality_detects_unparseable_timestamps():
+    bars = pd.DataFrame({
+        "timestamp": ["not-a-date"],
+        "open": [100],
+        "high": [101],
+        "low": [99],
+        "close": [100],
+        "volume": [1],
+    })
+    report = inspect_ohlcv(bars)
+    assert report["invalid_timestamps"] == 1
