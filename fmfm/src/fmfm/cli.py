@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import asyncio
 import json
 import math
 import sys
@@ -11,6 +12,7 @@ import httpx
 import pandas as pd
 
 from fmfm.data.hyperliquid import HyperliquidPublicData
+from fmfm.data.hyperliquid_ws import SUPPORTED_CHANNELS, collect_public_stream
 from fmfm.data.quality import inspect_ohlcv
 from fmfm.data.storage import read_bars_csv, write_bars_csv
 from fmfm.features.flow import candle_flow_features
@@ -72,6 +74,20 @@ def command_fetch(args: argparse.Namespace) -> int:
     _write_json(manifest_path, manifest)
     print(json.dumps(manifest, ensure_ascii=False, indent=2, default=str))
     return 0 if not bars.empty else 2
+
+
+def command_collect_live(args: argparse.Namespace) -> int:
+    asyncio.run(
+        collect_public_stream(
+            args.coin.upper(),
+            args.output,
+            channels=tuple(args.channels),
+            duration_seconds=args.duration_seconds,
+            reconnect_seconds=args.reconnect_seconds,
+            heartbeat_seconds=args.heartbeat_seconds,
+        )
+    )
+    return 0
 
 
 def command_fetch_funding(args: argparse.Namespace) -> int:
@@ -190,6 +206,15 @@ def build_parser() -> argparse.ArgumentParser:
     fetch.add_argument("--chunk-size", type=int, default=5000, help="Candles per request (1..5000)")
     fetch.add_argument("--timeout", type=float, default=15.0)
     fetch.set_defaults(func=command_fetch)
+
+    collect = commands.add_parser("collect-live", help="Append public WebSocket market events to JSONL")
+    collect.add_argument("--coin", required=True)
+    collect.add_argument("--output", type=Path, required=True)
+    collect.add_argument("--channels", nargs="+", choices=sorted(SUPPORTED_CHANNELS), default=["trades", "l2Book", "activeAssetCtx", "candle"])
+    collect.add_argument("--duration-seconds", type=float, default=0, help="0 runs until interrupted")
+    collect.add_argument("--reconnect-seconds", type=float, default=5)
+    collect.add_argument("--heartbeat-seconds", type=float, default=25)
+    collect.set_defaults(func=command_collect_live)
 
     funding = commands.add_parser("fetch-funding", help="Download public historical funding rates")
     funding.add_argument("--coin", required=True)
