@@ -1,6 +1,7 @@
 """Read-only adapter for Hyperliquid public Info API.
 
-This module intentionally does not implement signing or order placement.
+The candle endpoint exposes only the latest 5000 bars. Chunking can split a
+request within that accessible window; it cannot recover older candles.
 """
 from __future__ import annotations
 
@@ -26,6 +27,7 @@ _INTERVAL_MS = {
     "1w": 604_800_000,
 }
 _CANDLE_COLUMNS = ["timestamp", "open", "high", "low", "close", "volume", "trades"]
+_FUNDING_COLUMNS = ["timestamp", "coin", "funding_rate", "premium"]
 
 
 class HyperliquidPublicData:
@@ -69,8 +71,26 @@ class HyperliquidPublicData:
             .reset_index(drop=True)[_CANDLE_COLUMNS]
         )
 
+    @staticmethod
+    def _normalize_funding(rows: Any) -> pd.DataFrame:
+        if not rows:
+            return pd.DataFrame(columns=_FUNDING_COLUMNS)
+        frame = pd.DataFrame(rows).rename(
+            columns={"time": "timestamp", "fundingRate": "funding_rate"}
+        )
+        if "premium" not in frame:
+            frame["premium"] = pd.NA
+        frame["timestamp"] = pd.to_datetime(frame["timestamp"], unit="ms", utc=True)
+        for col in ["funding_rate", "premium"]:
+            frame[col] = pd.to_numeric(frame[col], errors="coerce")
+        return (
+            frame.sort_values("timestamp")
+            .drop_duplicates(["timestamp", "coin"], keep="last")
+            .reset_index(drop=True)[_FUNDING_COLUMNS]
+        )
+
     def candles(self, coin: str, interval: str, start_ms: int, end_ms: int) -> pd.DataFrame:
-        """Fetch one candle snapshot request (venue limit: up to 5000 candles)."""
+        """Fetch one candle snapshot request (venue history limit: latest 5000 bars)."""
         rows = self._post_info(
             {
                 "type": "candleSnapshot",
@@ -93,10 +113,10 @@ class HyperliquidPublicData:
         *,
         max_candles_per_request: int = 5000,
     ) -> pd.DataFrame:
-        """Fetch a long fixed-interval range in chunks and deduplicate boundaries.
+        """Fetch a range within the latest-5000-bar retention window.
 
-        Calendar-month intervals are intentionally excluded because they do not
-        have a fixed millisecond duration; monthly bars can be resampled locally.
+        Requests longer than 5000 bars are rejected. Splitting a request into
+        chunks does not bypass the venue's historical retention limit.
         """
         if interval not in _INTERVAL_MS:
             raise ValueError(
@@ -108,6 +128,14 @@ class HyperliquidPublicData:
             raise ValueError("max_candles_per_request must be between 1 and 5000")
 
         step_ms = _INTERVAL_MS[interval]
+        requested_count = (int(end_ms) - int(start_ms)) // step_ms + 1
+        if requested_count > 5000:
+            raise ValueError(
+                f"Requested range spans about {requested_count} {interval} bars; "
+                "Hyperliquid's candle API only exposes the latest 5000 bars. "
+                "Use an archive or collect data prospectively for longer history."
+            )
+
         cursor = int(start_ms)
         end_ms = int(end_ms)
         frames: list[pd.DataFrame] = []
@@ -130,6 +158,55 @@ class HyperliquidPublicData:
             .reset_index(drop=True)[_CANDLE_COLUMNS]
         )
 
+    def funding_history(
+        self,
+        coin: str,
+        start_ms: int,
+        end_ms: int,
+        *,
+        page_size: int = 500,
+    ) -> pd.DataFrame:
+        """Fetch historical funding in timestamp pages (API returns up to 500 rows/page)."""
+        if end_ms < start_ms:
+            raise ValueError("end_ms must be >= start_ms")
+        if not 1 <= page_size <= 500:
+            raise ValueError("page_size must be between 1 and 500")
+
+        cursor = int(start_ms)
+        end_ms = int(end_ms)
+        pages: list[pd.DataFrame] = []
+        while cursor <= end_ms:
+            rows = self._post_info(
+                {
+                    "type": "fundingHistory",
+                    "coin": coin,
+                    "startTime": cursor,
+                    "endTime": end_ms,
+                }
+            )
+            if not rows:
+                break
+            page = self._normalize_funding(rows)
+            if page.empty:
+                break
+            pages.append(page)
+            if len(rows) < page_size:
+                break
+            last_ms = int(pd.to_datetime(page["timestamp"], utc=True).max().timestamp() * 1000)
+            next_cursor = last_ms + 1
+            if next_cursor <= cursor:
+                break
+            cursor = next_cursor
+
+        if not pages:
+            return pd.DataFrame(columns=_FUNDING_COLUMNS)
+        result = pd.concat(pages, ignore_index=True)
+        return (
+            result.sort_values("timestamp")
+            .drop_duplicates(["timestamp", "coin"], keep="last")
+            .reset_index(drop=True)[_FUNDING_COLUMNS]
+        )
+
     def order_book(self, coin: str) -> dict[str, Any]:
         """Fetch one L2 order-book snapshot."""
         return self._post_info({"type": "l2Book", "coin": coin})
@@ -138,3 +215,11 @@ class HyperliquidPublicData:
         """Fetch current mid prices."""
         payload = self._post_info({"type": "allMids"})
         return {symbol: float(price) for symbol, price in payload.items()}
+
+    def meta_and_asset_contexts(self) -> Any:
+        """Fetch current perp metadata and current asset contexts.
+
+        Contexts include current funding and open interest, but are snapshots,
+        not historical time series. Persist repeated snapshots to build history.
+        """
+        return self._post_info({"type": "metaAndAssetCtxs"})
