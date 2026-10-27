@@ -17,6 +17,9 @@ dependencies = [
 [project.optional-dependencies]
 dev = ["pytest>=8", "ruff>=0.5"]
 
+[project.scripts]
+fmfm = "fmfm.cli:main"
+
 [tool.setuptools.packages.find]
 where = ["src"]
 
