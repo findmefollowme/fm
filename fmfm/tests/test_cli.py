@@ -1,5 +1,3 @@
-import argparse
-
 import pytest
 
 from fmfm.cli import _json_safe, _utc_ms, build_parser
@@ -36,5 +34,5 @@ def test_non_finite_metrics_serialize_as_json_null():
 
 
 def test_utc_ms_requires_timezone():
-    with pytest.raises(argparse.ArgumentTypeError):
+    with pytest.raises(ValueError):
         _utc_ms("2026-01-01 00:00:00")
