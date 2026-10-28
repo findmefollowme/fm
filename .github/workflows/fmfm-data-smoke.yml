@@ -1,0 +1,52 @@
+name: FMFM real-data smoke collection
+
+on:
+  push:
+    branches:
+      - fmfm-quant
+    paths:
+      - ".github/workflows/fmfm-data-smoke.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  collect-public-market-data:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout FMFM branch
+        uses: actions/checkout@v4
+        with:
+          ref: fmfm-quant
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: fmfm/pyproject.toml
+
+      - name: Install FMFM
+        working-directory: fmfm
+        run: python -m pip install --upgrade pip && python -m pip install -e ".[dev]"
+
+      - name: Collect recent public Hyperliquid data
+        working-directory: fmfm
+        run: |
+          python scripts/collect_local.py \
+            --coin BTC \
+            --candle-days 1 \
+            --funding-days 7 \
+            --live-minutes 5
+
+      - name: Upload collected data and verification report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fmfm-smoke-collection-${{ github.run_id }}
+          path: |
+            fmfm/data/collection_runs/
+          if-no-files-found: warn
+          retention-days: 7
